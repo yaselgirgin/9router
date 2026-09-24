@@ -71,6 +71,19 @@ export class DefaultExecutor extends BaseExecutor {
     const transformed = this.applyJsonSchemaFallback(body);
 
     if (transformed && typeof transformed === "object") {
+      // OpenAI GPT-5+/GPT-6 and o-series models reject the legacy max_tokens
+      // parameter on Chat Completions. Keep this scoped to the first-party
+      // OpenAI API provider so other OpenAI-compatible backends are unchanged.
+      const needsMaxCompletionTokens =
+        this.provider === "openai" &&
+        /^(?:gpt-(?:5|6)(?:[.-]|$)|o(?:1|3|4)(?:-|$))/i.test(String(model || ""));
+      if (needsMaxCompletionTokens && transformed.max_tokens !== undefined) {
+        if (transformed.max_completion_tokens === undefined) {
+          transformed.max_completion_tokens = transformed.max_tokens;
+        }
+        delete transformed.max_tokens;
+      }
+
       // quirk: some openai-compatible providers reject Anthropic's client_metadata field
       if (this.config.quirks?.dropClientMetadata) {
         delete transformed.client_metadata;
