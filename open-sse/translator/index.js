@@ -48,6 +48,38 @@ function stripContentTypes(body, stripList = []) {
   }
 }
 
+// OpenAI Responses uses reasoning.effort rather than Chat Completions'
+// reasoning_effort field. Newer GPT/o-series reasoning models also reject
+// sampling controls such as temperature/top_p while reasoning is enabled.
+function normalizeOpenAIResponsesParams(body, model) {
+  if (!body || typeof body !== "object") return body;
+
+  if (typeof body.reasoning_effort === "string") {
+    const existingReasoning =
+      body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
+        ? body.reasoning
+        : {};
+    body.reasoning = { ...existingReasoning, effort: body.reasoning_effort };
+    delete body.reasoning_effort;
+  }
+
+  const cleanModel = String(model || "").replace(/\([^()]+\)\s*$/, "").trim();
+  const isRestrictedReasoningModel =
+    /^(?:gpt-(?:5|6)(?:[.-]|$)|o(?:1|3|4)(?:-|$))/i.test(cleanModel);
+  const effort = typeof body.reasoning?.effort === "string"
+    ? body.reasoning.effort.toLowerCase()
+    : "";
+
+  if (isRestrictedReasoningModel && effort && effort !== "none") {
+    delete body.temperature;
+    delete body.top_p;
+    delete body.logprobs;
+    delete body.top_logprobs;
+  }
+
+  return body;
+}
+
 // Translate request: source -> openai -> target
 export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null) {
   ensureInitialized();
@@ -117,6 +149,10 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
     (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE);
   if (!kiroThinkingMappedByTranslator) {
     applyThinking(targetFormat, model, result, provider, thinkingIntent);
+  }
+
+  if (targetFormat === FORMATS.OPENAI_RESPONSES || targetFormat === FORMATS.OPENAI_RESPONSE) {
+    normalizeOpenAIResponsesParams(result, model);
   }
 
   // Always normalize to clean OpenAI format when target is OpenAI
